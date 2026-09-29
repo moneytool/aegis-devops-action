@@ -1,0 +1,103 @@
+name: Aegis-DevOps Plan Check
+description: Check a Terraform or OpenTofu plan against signed, authority-checked policy before it is applied
+author: Vamshidher Reddy Jannapu Reddy
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  plan:
+    description: >
+      Path to the plan. A JSON plan (from `terraform show -json tfplan`) is checked as is.
+      A binary plan file is converted with `<tool> show -json` first, which needs the tool on
+      PATH and an initialised working directory.
+    required: true
+  tool:
+    description: "`terraform` or `tofu`. Selects the plan schema label and the binary used to convert a binary plan."
+    required: false
+    default: terraform
+  working-directory:
+    description: Directory to run in. Relative `plan` and `config-dir` paths resolve from here.
+    required: false
+    default: .
+  config-dir:
+    description: >
+      Policy directory (as created by `aegis init .aegis`). Empty means Aegis's own search order:
+      $AEGIS_CONFIG_DIR, then ./.aegis, then ~/.config/aegis.
+    required: false
+    default: ""
+  fail-on:
+    description: "When to fail the step: `block` (default), `escalate` (ESCALATE or BLOCK), or `never` (report only)."
+    required: false
+    default: block
+  comment:
+    description: >
+      Post the result as a pull request comment, updated in place on later runs. Needs
+      `pull-requests: write`. A missing permission only produces a warning.
+    required: false
+    default: "true"
+  signing-key:
+    description: >
+      Key your policy files are signed with. Pass it from a repository secret. Empty means Aegis's default: $AEGIS_SIGNING_KEY, then the
+      example key that `aegis init` writes next to the example policy.
+    required: false
+    default: ""
+  github-token:
+    description: Token used for the pull request comment.
+    required: false
+    default: ${{ github.token }}
+  aegis-version:
+    description: Version of the aegis-devops package to install from PyPI.
+    required: false
+    default: "0.2.1"
+  python-version:
+    description: Python version to run Aegis with (3.11 or later).
+    required: false
+    default: "3.12"
+
+outputs:
+  verdict:
+    description: "Plan verdict: ALLOW, ESCALATE or BLOCK (ERROR if Aegis could not decide)."
+    value: ${{ steps.check.outputs.verdict }}
+  citations:
+    description: Comma-separated IDs of the policy rules that decided the verdict.
+    value: ${{ steps.check.outputs.citations }}
+  report:
+    description: Path to the full JSON-lines report from `aegis check`.
+    value: ${{ steps.check.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: false
+      id: python
+
+    - name: Install aegis-devops
+      shell: bash
+      env:
+        PYTHON: ${{ steps.python.outputs.python-path }}
+        AEGIS_VERSION: ${{ inputs.aegis-version }}
+      run: |
+        set -euo pipefail
+        "$PYTHON" -m venv "$RUNNER_TEMP/aegis-venv"
+        "$RUNNER_TEMP/aegis-venv/bin/python" -m pip install --quiet --disable-pip-version-check "aegis-devops==${AEGIS_VERSION}"
+        "$RUNNER_TEMP/aegis-venv/bin/aegis" --version || true
+
+    - name: Check plan
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        AEGIS_BIN: ${{ runner.temp }}/aegis-venv/bin/aegis
+        INPUT_PLAN: ${{ inputs.plan }}
+        INPUT_TOOL: ${{ inputs.tool }}
+        INPUT_CONFIG_DIR: ${{ inputs.config-dir }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_SIGNING_KEY: ${{ inputs.signing-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: '"$RUNNER_TEMP/aegis-venv/bin/python" "$GITHUB_ACTION_PATH/aegis_action.py"'
