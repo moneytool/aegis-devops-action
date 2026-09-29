@@ -1,0 +1,45 @@
+name: move-major-tag
+
+# Keeps the major tag (v1) on the newest v1.x.y release, so
+# `uses: moneytool/aegis-devops-action@v1` always gets the latest v1 release.
+# Runs when a release is published; can also be run by hand (with a dry run).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to point its major tag at (e.g. v1.2.0)
+        required: true
+      dry-run:
+        description: Only report what would change
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: move-major-tag
+  cancel-in-progress: false
+
+jobs:
+  move:
+    # prereleases and drafts never move the major tag
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.release.prerelease && !github.event.release.draft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Move the major tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          DRY_RUN: ${{ inputs.dry-run || false }}
+        run: .github/scripts/move-major-tag.sh
