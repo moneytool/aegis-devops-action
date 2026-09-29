@@ -4,7 +4,10 @@
 # write, REPO (owner/name) and TAG; DRY_RUN=true only reports.
 set -euo pipefail
 
-summary() { echo "$1"; [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+summary() {
+  echo "$1"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_STEP_SUMMARY"; fi
+}
 
 if [[ ! "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
   summary "$TAG is not a vMAJOR.MINOR.PATCH release; no major tag to move."
@@ -12,12 +15,14 @@ if [[ ! "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
 fi
 MAJOR="v${BASH_REMATCH[1]}"
 
-# Only the newest release of this major moves it: a patch to an older line
-# (v1.0.5 after v1.2.0) must not move v1 backwards.
-NEWEST=$(gh api --paginate "repos/$REPO/git/matching-refs/tags/$MAJOR." --jq '.[].ref' \
-  | sed 's#^refs/tags/##' | grep -E "^$MAJOR\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1 || true)
+# Only the newest *published, non-prerelease release* of this major moves it:
+# a patch to an older line (v1.0.5 after v1.2.0) must not move v1 backwards,
+# and a tag with no release yet, or a draft or prerelease, does not count.
+NEWEST=$(gh api --paginate "repos/$REPO/releases" \
+  --jq '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name' \
+  | grep -E "^$MAJOR\.[0-9]+\.[0-9]+$" | sort -V | tail -n 1 || true)
 if [ "$NEWEST" != "$TAG" ]; then
-  summary "$TAG is not the newest $MAJOR release (${NEWEST:-none found}); $MAJOR stays where it is."
+  summary "$TAG is not the newest published $MAJOR release (${NEWEST:-none found}); $MAJOR stays where it is."
   exit 0
 fi
 
