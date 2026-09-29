@@ -1,0 +1,83 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  json-plans:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Example policy
+        run: pipx run --spec aegis-devops==0.2.1 aegis init .aegis
+
+      - name: Allowed plan
+        id: allow
+        uses: ./
+        with:
+          plan: tests/plans/allow.json
+          comment: "false"
+
+      - name: Plan blocked by a plan-level rule
+        id: block
+        continue-on-error: true
+        uses: ./
+        with:
+          plan: tests/plans/block-db-delete.json
+
+      - name: Large plan escalates but passes with fail-on block
+        id: escalate
+        uses: ./
+        with:
+          plan: tests/plans/escalate-large.json
+          comment: "false"
+
+      - name: Assert results
+        env:
+          ALLOW: ${{ steps.allow.outputs.verdict }}
+          BLOCK: ${{ steps.block.outputs.verdict }}
+          BLOCK_OUTCOME: ${{ steps.block.outcome }}
+          BLOCK_CITES: ${{ steps.block.outputs.citations }}
+          ESCALATE: ${{ steps.escalate.outputs.verdict }}
+        run: |
+          set -x
+          test "$ALLOW" = ALLOW
+          test "$BLOCK" = BLOCK
+          test "$BLOCK_OUTCOME" = failure
+          test "$BLOCK_CITES" = plan-no-db-deletes
+          test "$ESCALATE" = ESCALATE
+
+  binary-plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+
+      - name: Example policy
+        run: pipx run --spec aegis-devops==0.2.1 aegis init .aegis
+
+      - name: Terraform plan
+        working-directory: tests/tf
+        run: terraform init -input=false && terraform plan -input=false -out=tfplan
+
+      - name: Check the binary plan
+        id: check
+        uses: ./
+        with:
+          plan: tfplan
+          working-directory: tests/tf
+          config-dir: ../../.aegis
+          comment: "false"
+
+      - name: Assert result
+        run: test "${{ steps.check.outputs.verdict }}" = ALLOW
