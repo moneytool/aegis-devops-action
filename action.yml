@@ -85,7 +85,7 @@ runs:
         set -euo pipefail
         "$PYTHON" -m venv "$RUNNER_TEMP/aegis-venv"
         "$RUNNER_TEMP/aegis-venv/bin/python" -m pip install --quiet --disable-pip-version-check "aegis-devops==${AEGIS_VERSION}"
-        "$RUNNER_TEMP/aegis-venv/bin/aegis" --version || true
+        "$RUNNER_TEMP/aegis-venv/bin/python" -c "import aegis_core; print('aegis-devops', aegis_core.__version__)"
 
     - name: Check plan
       id: check
